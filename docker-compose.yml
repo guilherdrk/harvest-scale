@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agrobalance-db
+    environment:
+      POSTGRES_DB: agro_balance_db
+      POSTGRES_USER: agro_user
+      POSTGRES_PASSWORD: agro_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+
