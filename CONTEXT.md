@@ -16,26 +16,30 @@ Sistema corporativo voltado para grandes produtoras agrícolas do Matopiba (como
 
 ### Concluído no Dia 1 (Infraestrutura e Banco de Dados)
 - Projeto `agro-scale-api` criado e conectado ao container PostgreSQL no Docker (`localhost:5432/agro_balance_db`).
-- Flyway configurado e validado com 2 migrations aplicadas no schema `public`:
-  - **`V1__create_initial_schema.sql`**: Criadas as tabelas `safras`, `fazendas`, `talhoes`, `silos` e `romaneios_pesagem` (já contendo a coluna `uuid_origem_campo` para integração idempotente com o app Android offline).
-  - **`V2__seed_initial_data.sql`**: Dados iniciais inseridos (`Safra Soja 2026/2027`, `Fazenda Serra Branca` em Uruçuí-PI com 12.500 ha, talhão `TL-01A` e `Silo Central 01`).
+- Flyway configurado e validado com 2 migrations iniciais (`V1` e `V2`):
+  - **`V1__create_initial_schema.sql`**: Tabelas `safras`, `fazendas`, `talhoes`, `silos` e `romaneios_pesagem`.
+  - **`V2__seed_initial_data.sql`**: Dados iniciais (`Safra Soja 2026/2027`, `Fazenda Serra Branca`, talhão `TL-01A` e `Silo Central 01`).
 
 ### Concluído no Dia 2 (Domínio, Cálculo de Romaneio e API da Balança)
-- Entidades JPA (`@Entity`) mapeadas e validadas com `ddl-auto=validate`: `Safra`, `Fazenda`, `Talhao`, `Silo`, `RomaneioPesagem` e enum `StatusRomaneio`.
-- Interfaces `Spring Data JPA` (`SafraRepository`, `FazendaRepository`, `TalhaoRepository`, `SiloRepository`, `RomaneioPesagemRepository` com busca por `uuidOrigemCampo`).
-- `CalculadoraRomaneioService` e `ResultadoCalculoRomaneio` implementados com `BigDecimal` (`scale = 2`, `RoundingMode.HALF_UP`) e validados com 4 testes unitários no JUnit 5 (`CalculadoraRomaneioServiceTest`).
-- DTOs (`AberturaRomaneioRequest`, `FechamentoRomaneioRequest`, `RomaneioResponse`), `RomaneioService` (`@Transactional`) e `RomaneioController` (`/api/v1/romaneios`) implementados com abertura de pesagem, fechamento com laudo de classificação e atualização automática com validação de capacidade máxima no saldo do `Silo`.
+- Entidades JPA (`Safra`, `Fazenda`, `Talhao`, `Silo`, `RomaneioPesagem`, `StatusRomaneio`) e Repositories Spring Data JPA.
+- `CalculadoraRomaneioService` e `ResultadoCalculoRomaneio` com `BigDecimal` (`scale = 2`, `RoundingMode.HALF_UP`) validados com JUnit 5 (`CalculadoraRomaneioServiceTest`).
+- Fluxo REST da balança rodoviária (`/api/v1/romaneios`): abertura de romaneio, fechamento com laudo de classificação e atualização transacional do saldo do `Silo`.
+
+### Concluído no Dia 3 (Fechamento do Back-end Core / Mês 1)
+- **Tratamento Global de Erros:** `ApiErrorResponse` e `GlobalExceptionHandler` (`@RestControllerAdvice`) mapeando `404`, `422`, `400` (incluindo `fieldErrors` do `@Valid`) e `409`.
+- **Cadastros Operacionais e Silos:** DTOs, Services e Controllers REST para `/api/v1/silos` (com `capacidadeDisponivelKg` e `percentualOcupacao`), `/api/v1/safras`, `/api/v1/fazendas` e `/api/v1/talhoes`.
+- **Dashboard de Produtividade por Talhão:** `GET /api/v1/dashboard/produtividade-talhoes` (com filtro opcional `?safraId=`), agregando via JPQL o `PLSL` finalizado por talhão e calculando `totalSacas` e `produtividadeSacasPorHa` (`Sacas de 60kg / ha`).
+- **Migration `V3` (`V3__create_table_apontamentos_campo.sql`):** Tabela `apontamentos_campo`, entidade `ApontamentoCampo` (chave `UUID` gerada offline no dispositivo) e `ApontamentoCampoRepository`.
 
 ## 4. Regras de Negócio do Romaneio de Grãos (Cálculo Oficial)
 Todo cálculo de pesagem na API usa `BigDecimal` com escala de 2 casas decimais (`RoundingMode.HALF_UP`):
 1. **Peso Líquido Inicial (PLI):** `Peso Bruto - Tara`.
 2. **Desconto de Impureza (DI):** Se `impureza_percentual > impureza_padrao` (ex: 1.00%), desconta o percentual excedente sobre o PLI: `PLI * ((impureza_medida - impureza_padrao) / 100)`.
 3. **Desconto de Umidade (DU):** Se `umidade_percentual > umidade_padrao` (ex: 14.00%), aplica a fórmula oficial sobre a base limpa (`PLI - DI`): `(PLI - DI) * ((umidade_medida - umidade_padrao) / (100 - umidade_padrao))`.
-4. **Peso Líquido Seco e Limpo (PLSL):** `PLI - DI - DU` (este é o peso real que soma no `saldo_atual_kg` da tabela `silos` e compõe a produtividade do `talhao`).
+4. **Peso Líquido Seco e Limpo (PLSL):** `PLI - DI - DU` (soma no `saldo_atual_kg` da tabela `silos` e compõe a produtividade do `talhao`).
 5. **Conversão em Sacas:** `PLSL / 60`.
 
-## 5. Próximos Passos (Meta do Dia 3 — Fechamento do Back-end Core / Mês 1)
-1. **Tratamento Global de Erros (`@RestControllerAdvice`):** Padronizar respostas HTTP (`404 Not Found`, `422 Unprocessable Entity`, `400 Bad Request`) para validações de negócio (ex: capacidade do silo excedida, safra inativa, romaneio já finalizado).
-2. **Endpoints de Cadastros Operacionais e Silos:** Criar Controllers e DTOs para `Safra`, `Fazenda`, `Talhao` e `Silo` (incluindo cálculo de percentual de ocupação do silo para o painel gerencial).
-3. **Indicador de Produtividade por Talhão (Sacas/ha):** Criar consulta/endpoint de dashboard que retorna o total colhido (PLSL e sacas de 60kg) e a produtividade média parcial (`sacas / area_ha`) por talhão e fazenda.
-4. **Migration `V3` — Apontamentos de Campo (`apontamentos_campo`):** Criar a tabela e entidade `ApontamentoCampo` (`uuid`, `talhao_id`, `tipo_ocorrencia`, `descricao`, `latitude`, `longitude`, `criado_em_dispositivo`, `sincronizado_em`) preparando a base para o endpoint `/api/v1/sync/batch`.
+## 5. Próximos Passos (Meta do Dia 4 — Preparação para o Front-end Web / Mês 2)
+1. **Configuração de CORS:** Liberar a origem do Front-end Web (`localhost:4200` / `localhost:5173`) na API Spring Boot.
+2. **Comprovante de Romaneio em PDF:** Criar endpoint `GET /api/v1/romaneios/{id}/comprovante-pdf` para geração do ticket da balança rodoviária.
+3. **Inicialização do Front-end Web (Mês 2):** Criar o projeto Web (Angular ou React) com telas de Cadastros (Safra, Fazenda, Talhão), Operação de Balança (Abertura/Fechamento de Romaneio) e Dashboard Gerencial (Ocupação de Silos + Produtividade por Talhão).
